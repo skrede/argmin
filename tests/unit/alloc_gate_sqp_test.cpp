@@ -122,9 +122,10 @@ TEST_CASE("sqp_alloc_gate_nw", "[alloc-gate]")
 {
     const auto opts = sqp_gate_opts();
 
+    // HS071 converges in six iterations, so its armed window holds the three steps after the two warm-up steps.
     check_steady_zero(sensor::measure_steady(
         argmin::nw_sqp_policy<double, argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, opts, 10));
+        argmin::hs071<>{}, opts, 3));
     check_steady_zero(sensor::measure_steady(
         argmin::nw_sqp_policy<double, argmin::sd006<>::problem_dimension>{},
         argmin::sd006<>{}, opts, 10));
@@ -168,9 +169,10 @@ TEST_CASE("sqp_alloc_gate_filter_nw", "[alloc-gate]")
 {
     const auto opts = sqp_gate_opts();
 
+    // HS071 converges in six iterations, so its armed window holds the three steps after the two warm-up steps.
     check_steady_zero(sensor::measure_steady(
         argmin::filter_nw_sqp_policy<double, argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, opts, 10));
+        argmin::hs071<>{}, opts, 3));
     check_steady_zero(sensor::measure_steady(
         argmin::filter_nw_sqp_policy<double, argmin::sd012<>::problem_dimension>{},
         argmin::sd012<>{}, opts, 10));

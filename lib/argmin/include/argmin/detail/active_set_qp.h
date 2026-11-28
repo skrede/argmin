@@ -16,6 +16,7 @@
 
 #include "argmin/detail/givens_qr_update.h"
 #include "argmin/detail/householder_apply.h"
+#include "argmin/detail/qp_feasibility_projection.h"
 #include "argmin/types.h"
 #include "argmin/options/qp_options.h"
 
@@ -631,6 +632,7 @@ public:
         , A_aug_(max_constraints, n)
         , b_aug_(max_constraints)
         , ZtG_(n, n)
+        , feasibility_(n, max_constraints)
     {
         W_.reserve(static_cast<std::size_t>(max_constraints));
         last_W_.reserve(static_cast<std::size_t>(max_constraints));
@@ -639,15 +641,13 @@ public:
 
     active_set_qp_solver() = default;
 
-    // Solve QP subproblem using pre-allocated workspace.
-    //
-    // Accepts any x0; if x0 violates A_eq * x0 = b_eq within `tol`, a
-    // minimum-norm phase-1 correction projects x onto the equality
-    // manifold per N&W Section 16.1's feasibility invariant before the
-    // active-set loop begins. The active-set algorithm itself assumes
-    // the iterate is feasible w.r.t. the working-set equalities (the
-    // m >= n branch in solve_equality_subproblem returns p = 0 only
-    // under that precondition).
+    // Accepts any x0: one off the equality rows is projected onto them, and one
+    // that then violates a finite inequality row is moved to the nearest point
+    // satisfying every row, or reported infeasible when no point does, before
+    // the active-set loop begins (N&W Section 16.1's feasibility invariant).
+    // The loop itself assumes an iterate feasible for its working set (the
+    // m >= n branch in solve_equality_subproblem returns p = 0 only under
+    // that precondition).
     //
     // Preconditions:
     //   - A_eq is of shape m_eq x n with m_eq <= n; over-determined
@@ -822,12 +822,6 @@ private:
         out.relaxation_factor = Scalar(0);
     }
 
-    // Run the active-set method over the pre-assembled member constraint
-    // block A_full_ / b_full_ (first m_eq rows equality, next m_ineq rows
-    // inequality). Fills the iterate x_, the full multipliers lambda_full_,
-    // and the run status_ / iters_. All working buffers are members, so a
-    // warm steady-state solve is heap-allocation-free.
-    //
     // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     void run_active_set(
         int n, int m_eq, int m_ineq,
@@ -850,55 +844,12 @@ private:
         x_.head(n) = x0;
         auto x = x_.head(n);
 
-        // Phase-1 feasibility projection. The active-set machinery in
-        // solve_equality_subproblem_into assumes x is feasible w.r.t. the
-        // working-set equalities (m>=n branch returns p=0 unconditionally).
-        // Restore that invariant at entry by projecting any infeasible x0
-        // onto the equality manifold via the minimum-norm correction
-        //   dx = A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x)
-        // with a thin QR factorization of A_eq^T (the equality rows live in
-        // A_full_.topRows(m_eq)). residual_ / rhs_ are members so the test +
-        // projection allocate nothing.
-        // Reference: N&W 2e Section 16.1, Algorithm 16.1, pp. 460-463
-        //            (feasibility invariant); N&W 2e Section 10.3 / Lemma 16.5
-        //            (minimum-norm under-determined solution).
-        if(m_eq > 0)
+        if(!restore_equality_rows(n, m_eq, tol) || !restore_inequality_rows(n, m_eq, m_total, tol, verify_tol))
         {
-            // Precondition: A_eq must be of shape m_eq x n with m_eq <= n.
-            assert(m_eq <= n
-                   && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
-
-            residual_.head(m_eq).noalias() =
-                b_full_.head(m_eq) - A_full_.topRows(m_eq).leftCols(n) * x;
-            if(residual_.head(m_eq).cwiseAbs().maxCoeff() > tol)
-            {
-                const Scalar magnitude = equality_row_magnitude<Scalar>(A_full_.leftCols(n), x, m_eq);
-                qr_lambda_.compute(A_full_.topRows(m_eq).leftCols(n).transpose());
-                bool reliable = equality_projection_is_reliable(
-                    qr_lambda_.matrixQR().diagonal(), m_eq, Eigen::NumTraits<Scalar>::epsilon());
-                if(reliable)
-                {
-                    rhs_.head(n).setZero();
-                    rhs_.head(m_eq) = qr_lambda_.matrixQR()
-                        .topLeftCorner(m_eq, m_eq)
-                        .template triangularView<Eigen::Upper>()
-                        .transpose()
-                        .solve(residual_.head(m_eq));
-                    apply_householder_q_on_the_left(qr_lambda_, m_eq, false, rhs_.head(n), residual_);
-                    x += rhs_.head(n);
-                    // An unpivoted diagonal can miss a near-singular factor (Kahan's
-                    // matrix), so the landed residual is the second escalation trigger.
-                    reliable = equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq,
-                                                        tol, magnitude);
-                }
-                if(!reliable && !project_equalities_pivoted(n, m_eq, tol, magnitude))
-                {
-                    lambda_full_.head(m_total).setZero();
-                    status_ = qp_status::infeasible;
-                    iters_ = 0;
-                    return;
-                }
-            }
+            lambda_full_.head(m_total).setZero();
+            status_ = qp_status::infeasible;
+            iters_ = 0;
+            return;
         }
 
         qr_valid_ = false;
@@ -1039,20 +990,7 @@ private:
         givens_update_count_ = 0;
     }
 
-    // Solve equality-constrained QP subproblem via null-space method.
-    //
-    // Uses explicit Q/R factorization with Givens-based incremental updates
-    // when the working set changes by one constraint. Falls back to full
-    // HouseholderQR on the first call and periodically to prevent drift.
-    //
-    // Reference: N&W Section 16.2, eq. 16.16-16.19.
-    //            N&W Algorithm 16.3 (QR update via Givens rotations).
-    // Determine the initial working set from the (already-assembled) member
-    // constraint block A_full_ / b_full_, writing indices into W_. Uses member
-    // scratch (iws_trial_ / iws_qr_ / iws_candidates_) so no per-solve heap
-    // allocation for the rank-revealing admission scan. Same admission rule as
-    // the free initial_working_set: equalities first, then active inequalities
-    // whose gradient row is independent of the retained basis.
+    // The admission rule of the free initial_working_set, on member scratch.
     void compute_initial_working_set(
         const Eigen::Ref<const n_vector>& x,
         int m_total, int n, int m_eq, Scalar tol)
@@ -1091,6 +1029,55 @@ private:
                 W_.push_back(idx);
             }
         }
+    }
+
+    // The active-set loop needs an iterate feasible for its working set (N&W 2e Section 16.1); an infeasible start is
+    // moved by the minimum-norm correction onto the equality rows (Lemma 16.5), escalated to the pivoted factor when
+    // the unpivoted one is unreliable.
+    bool restore_equality_rows(int n, int m_eq, Scalar tol)
+    {
+        if(m_eq == 0)
+            return true;
+        assert(m_eq <= n && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
+        residual_.head(m_eq).noalias() = b_full_.head(m_eq) - A_full_.topRows(m_eq).leftCols(n) * x_.head(n);
+        if(residual_.head(m_eq).cwiseAbs().maxCoeff() > tol)
+        {
+            const Scalar magnitude = equality_row_magnitude<Scalar>(A_full_.leftCols(n), x_.head(n), m_eq);
+            return project_equalities_unpivoted(n, m_eq, tol, magnitude) || project_equalities_pivoted(n, m_eq, tol, magnitude);
+        }
+        return true;
+    }
+
+    // An unpivoted diagonal can miss a near-singular factor (Kahan's matrix), so the landed residual is the second
+    // escalation trigger.
+    bool project_equalities_unpivoted(int n, int m_eq, Scalar tol, Scalar magnitude)
+    {
+        auto x = x_.head(n);
+        qr_lambda_.compute(A_full_.topRows(m_eq).leftCols(n).transpose());
+        if(!equality_projection_is_reliable(qr_lambda_.matrixQR().diagonal(), m_eq, Eigen::NumTraits<Scalar>::epsilon()))
+            return false;
+        rhs_.head(n).setZero();
+        rhs_.head(m_eq) = qr_lambda_.matrixQR()
+            .topLeftCorner(m_eq, m_eq)
+            .template triangularView<Eigen::Upper>()
+            .transpose()
+            .solve(residual_.head(m_eq));
+        apply_householder_q_on_the_left(qr_lambda_, m_eq, false, rhs_.head(n), residual_);
+        x += rhs_.head(n);
+        return equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq, tol, magnitude);
+    }
+
+    // The projection meets the rows it moves onto only to rounding, so the working set is rescanned at the verification
+    // floor rather than at the inner tolerance.
+    bool restore_inequality_rows(int n, int m_eq, int m_total, Scalar tol, Scalar scan_tol)
+    {
+        auto x = x_.head(n);
+        if(!violates_inequality_rows(A_full_.leftCols(n), b_full_, x, m_eq, m_total, tol))
+            return true;
+        if(!feasibility_.project(A_full_.leftCols(n), b_full_, x, m_eq, m_total, tol))
+            return false;
+        compute_initial_working_set(x, m_total, n, m_eq, scan_tol);
+        return true;
     }
 
     // Rank-truncated minimum-norm equality correction from the column-pivoted factor of A_eq^T
@@ -1150,10 +1137,8 @@ private:
         return {alpha, blocking_idx};
     }
 
-    // Fill-into equality-subproblem solve. Writes the step into p_sub_.head(n)
-    // and the working-set multipliers into lambda_sub_.head(m); the caller
-    // reads those persistent segments. All intermediate matrices/vectors are
-    // member buffers so no per-active-set-iteration heap allocation occurs.
+    // Null-space method (N&W Section 16.2, eq. 16.16-16.19) on an explicit Q/R kept current by Givens updates
+    // (N&W Algorithm 16.3) and refactorized periodically against their drift.
     void solve_equality_subproblem_into(
         const Eigen::Ref<const n_square_matrix>& G,
         const Eigen::Ref<const n_vector>& g_k,
@@ -1294,9 +1279,10 @@ private:
 
     constraint_matrix A_aug_;
     constraint_vector b_aug_;
-    // Declared last: storage inserted ahead of existing members shifts their addresses, and Eigen's
+    // Both follow every other member: storage inserted ahead of existing members shifts their addresses, and Eigen's
     // alignment peeling on unaligned fixed-size storage then changes the rounding of some fixed-N sizes.
     n_square_matrix ZtG_;
+    qp_feasibility_projection<Scalar> feasibility_;
 };
 
 // Dense active-set QP solver.

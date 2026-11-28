@@ -22,10 +22,10 @@
 // Inherited contract limits (checked up front and surfaced on the error
 // channel, never hidden):
 //   - Feasible start. The active-set method assumes a feasible x0 (N&W
-//     Alg. 16.1); the delegated solver's equality-manifold feasibility
-//     restoration corrects only the equality rows and never reports an
-//     infeasible status, so a start that violates l <= A x0 <= u on the mapped
-//     rows is rejected here as qp_error::infeasible_start.
+//     Alg. 16.1). A start that violates l <= A x0 <= u on the mapped rows by
+//     more than the entry tolerance is rejected here as
+//     qp_error::infeasible_start; the delegated solver moves one within it onto
+//     the rows.
 //   - Equality-row count <= n. The delegated solver requires the equality
 //     block to have at most n rows; more than n equality rows is
 //     rejected as qp_error::invalid_problem.

@@ -239,6 +239,17 @@ Policies available at HEAD, grouped by problem class:
   neither is returned over a finite member, and the next member starts. If
   every member ends non-finite, the solve ends with `non_finite_evaluation` at
   its best finite evaluated point.
+- The active-set QP inside `nw_sqp` and `filter_nw_sqp` solves from a start
+  that violates an inequality or bound row. It moved such a start onto the
+  equality rows only, and its loop, which assumes a feasible iterate, could end
+  at a point that still violated a row. The start now first moves to the
+  nearest point that satisfies every row, and the QP reports infeasible when
+  the rows have no common point. A start that satisfies every row takes the
+  same path as before. On HS071 both policies now converge in 6 iterations
+  instead of 13, at a constraint violation of about 3e-9 instead of 3e-7, and
+  `nw_sqp` solves a joint equality and inequality problem it did not finish
+  within 20 iterations. `dense_active_set_qp_solver` still rejects an
+  infeasible start; one within its entry tolerance is moved the rest of the way.
 - The moving-asymptote solvers (`mma`, `gcmma`, `ccsa_quadratic` and the GCMMA
   alternates) and the least-squares solvers (`lm`, `projected_gn`,
   `projected_gradient_gn`) report `non_finite_evaluation` for an objective,

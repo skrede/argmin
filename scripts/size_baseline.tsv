@@ -2,7 +2,7 @@
 # Rows are kind<TAB>path<TAB>name<TAB>lines; kind is file or function, and a file row has - as name.
 # Rows sort by kind, then path, then name, then lines.
 # This file only shrinks: lower a count or delete a row as a unit is decomposed, never raise or add one.
-file	lib/argmin/include/argmin/detail/active_set_qp.h	-	1516
+file	lib/argmin/include/argmin/detail/active_set_qp.h	-	1502
 file	lib/argmin/include/argmin/detail/augmented_lagrangian.h	-	205
 file	lib/argmin/include/argmin/detail/byrd_omojokun.h	-	788
 file	lib/argmin/include/argmin/detail/cauchy_point.h	-	319
@@ -74,7 +74,7 @@ function	lib/argmin/include/argmin/detail/active_set_qp.h	compute_initial_workin
 function	lib/argmin/include/argmin/detail/active_set_qp.h	initial_working_set	33
 function	lib/argmin/include/argmin/detail/active_set_qp.h	initial_working_set	35
 function	lib/argmin/include/argmin/detail/active_set_qp.h	most_negative_multiplier	32
-function	lib/argmin/include/argmin/detail/active_set_qp.h	run_active_set	172
+function	lib/argmin/include/argmin/detail/active_set_qp.h	run_active_set	129
 function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_equality_qp	80
 function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_equality_subproblem_into	73
 function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_qp	145

@@ -127,3 +127,26 @@ TEST_CASE("qp_alloc_gate_active_set_phase1_first_solve", "[alloc-gate]")
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
 }
+
+// The equality projection of the zero start lands on (1/3, 1/3, 1/3), below the row x0 >= 0.5, so the first solve also
+// moves its start onto the inequality rows. The loop alone would stop at that infeasible start, so optimal witnesses
+// the move; the solution is (0.5, -0.25, 0.75).
+TEST_CASE("qp_alloc_gate_active_set_inequality_phase1_first_solve", "[alloc-gate]")
+{
+    using solver_type = argmin::detail::active_set_qp_solver<double, 3, argmin::dynamic_dimension>;
+    const Eigen::Matrix3d G = Eigen::Matrix3d::Identity();
+    const Eigen::Vector3d d(-1.0, -2.0, -3.0);
+    const Eigen::Matrix<double, Eigen::Dynamic, 3> A_eq{{1.0, 1.0, 1.0}};
+    const Eigen::VectorXd b_eq{{1.0}};
+    const Eigen::Matrix<double, Eigen::Dynamic, 3> A_ineq{{1.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}};
+    const Eigen::VectorXd b_ineq{{0.5, -1.0}};
+    const Eigen::Vector3d x0 = Eigen::Vector3d::Zero();
+    solver_type solver(3, 4);
+    solver_type::result_type out;
+    out.lambda.setZero(3);
+    const auto counts = run_armed([&] { solver.solve_into(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, argmin::qp_options<>{}, out); });
+    CHECK(out.status == argmin::detail::qp_status::optimal);
+    CHECK((out.x - Eigen::Vector3d(0.5, -0.25, 0.75)).cwiseAbs().maxCoeff() <= 1e-12);
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+}

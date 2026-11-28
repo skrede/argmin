@@ -67,6 +67,7 @@ add_executable(argmin_unit_tests
     trust_region_box_start_test.cpp
     stepper_test.cpp
     active_set_qp_test.cpp
+    active_set_qp_phase1_test.cpp
     lsei_mode4_test.cpp
     compact_lbfgs_test.cpp
     test_functions_test.cpp

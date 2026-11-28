@@ -427,7 +427,7 @@ jobs:
           # guard exists to catch a dropped gate; it must not miscount silently.
           count=$(ctest -N -L alloc-gate | grep -cE '^ *Test +#')
           echo "allocation gates registered: $count"
-          test "$count" -eq 25 || { echo "expected 25 allocation gates, found $count"; exit 1; }
+          test "$count" -eq 26 || { echo "expected 26 allocation gates, found $count"; exit 1; }
 
       # The literal is deliberate: fixing a known defect turns its case red, and the fixing change lowers it.
       - name: Verify the full known-defect set registered
@@ -435,7 +435,7 @@ jobs:
           cd build
           count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
           echo "known defects registered: $count"
-          test "$count" -eq 154 || { echo "expected 154 known defects, found $count"; exit 1; }
+          test "$count" -eq 152 || { echo "expected 152 known defects, found $count"; exit 1; }
 
       # The literal is deliberate: adding or removing an oracle pin should force a visible edit.
       - name: Verify the full oracle-pin set registered

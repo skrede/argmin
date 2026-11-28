@@ -87,12 +87,12 @@ TEST_CASE("kraft_slsqp solves the joint equality and inequality problem", "[sqp]
     CHECK(at_joint_solution(solve_joint_rows<kraft_slsqp_policy<>>(20)));
 }
 
-TEST_CASE("nw_sqp solves the joint equality and inequality problem within 20 iterations", "[known-defect][!shouldfail]")
+TEST_CASE("nw_sqp solves the joint equality and inequality problem within 20 iterations", "[sqp]")
 {
     CHECK(at_joint_solution(solve_joint_rows<nw_sqp_policy<>>(20)));
 }
 
-TEST_CASE("the active-set QP reaches the joint optimum from a seed off the equality row", "[known-defect][!shouldfail]")
+TEST_CASE("the active-set QP reaches the joint optimum from a seed off the equality row", "[qp]")
 {
     detail::active_set_qp_solver<double> qp(2, 2);
     const auto r = qp.solve(Eigen::MatrixXd::Identity(2, 2).eval(),

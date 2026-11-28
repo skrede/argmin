@@ -1030,12 +1030,9 @@ TEST_CASE("active_set_qp_solver does not return optimal for an infeasible termin
         lambda << 0.0;
         CHECK_FALSE(holds());
 
-        // Through the solver: x >= 1 and -x >= 0 from x0 = 0.5, where both rows are violated by
-        // 0.5. The first step blocks on x >= 1 at alpha = 0, the working set {x >= 1} then
-        // fills the single dimension, p = 0, and its multiplier g / 1 = 0.5 is nonnegative, so
-        // the loop reaches its terminal branch at x = 0.5 with both rows still violated. That
-        // iterate has no infeasibility certificate, so it is reported as a bounded-iteration
-        // outcome rather than optimal or infeasible.
+        // Through the solver: x >= 1 and -x >= 0 have no common point and x0 = 0.5 violates
+        // both, so the start is never handed to the loop: the projection onto the inequality
+        // rows finds them inconsistent and the solve ends infeasible at the start.
         Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
         Eigen::VectorXd d{{0.0}};
         Eigen::MatrixXd A_eq(0, 1);
@@ -1045,8 +1042,9 @@ TEST_CASE("active_set_qp_solver does not return optimal for an infeasible termin
         Eigen::VectorXd b_in{{1.0, 0.0}};
         active_set_qp_solver<double> solver(1, 2);
         auto result = solver.solve(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd{{0.5}});
-        CHECK(result.status == qp_status::max_iterations);
-        CHECK(result.x[0] == Approx(0.5).margin(1e-12));
+        CHECK(result.status == qp_status::infeasible);
+        CHECK(result.iterations == 0);
+        CHECK(result.x[0] == 0.5);
     }
 
     SECTION("dual sign")
@@ -1141,8 +1139,9 @@ TEST_CASE("active-set projection judges a large start by its backward error", "[
 TEST_CASE("active-set terminal verification is not excused by a far bound on another row",
           "[qp][qp_kkt]")
 {
-    // The contradictory pair x1 >= 1, -x1 >= 0 from x1 = 0.5 ends unverified; adding the slack row
-    // x2 >= -1e30 must not lend its magnitude to the violated rows.
+    // The contradictory pair x1 >= 1, -x1 >= 0 from x1 = 0.5: adding the slack row x2 >= -1e30 must
+    // not lend its magnitude to the violated rows. The free function reaches its terminal there and
+    // ends unverified; the solver's projection onto the rows proves them inconsistent.
     Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
     Eigen::VectorXd d = Eigen::VectorXd::Zero(2);
     Eigen::MatrixXd A_eq(0, 2);
@@ -1154,7 +1153,7 @@ TEST_CASE("active-set terminal verification is not excused by a far bound on ano
     const Eigen::VectorXd b_in{{1.0, 0.0, -1e30}};
     const Eigen::VectorXd x0{{0.5, 0.0}};
     active_set_qp_solver<double> solver(2, 3);
-    CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
+    CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::infeasible);
     CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
 }
 
